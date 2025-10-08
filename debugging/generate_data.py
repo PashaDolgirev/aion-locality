@@ -77,6 +77,6 @@ dataset_blob = {
     "rho_test":  rho_test,  "targets_test":  targets_test,
 }
 
-torch.save(dataset_blob, save_dir / "dataset.pt")
-print(f"Saved to {save_dir/'loc_functional_data.pt'} (~{(save_dir/'dataset.pt').stat().st_size/1e6:.2f} MB)")
+torch.save(dataset_blob, save_dir / "loc_functional_data.pt")
+print(f"Saved to {save_dir/'loc_functional_data.pt'} (~{(save_dir/'loc_functional_data.pt').stat().st_size/1e6:.2f} MB)")
 
