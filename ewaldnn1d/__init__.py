@@ -38,7 +38,7 @@ from .energies_utils import (
     E_int_dct_v2,
 )
 
-# --- Energy neural networks ---
+# --- Energy models ---
 from .linear_models import (
     KernelOnlyEnergyNN,
     GaussianMixtureEnergyNN,
@@ -52,6 +52,17 @@ from .training_utils import (
     load_checkpoint,
     _run_epoch,
     train_with_early_stopping,
+)
+
+# --- Correlation function utilities ---
+from .corr_funcs_utils import (
+    C_m1m2_sym_def,
+    C_m1m2_sym,
+    C_mm,
+    second_moment_analytical,
+    dens_dens_corr_func,
+    dens_dens_corr_func_sym,
+    make_symmetric,
 )
 
 __all__ = [
@@ -96,4 +107,13 @@ __all__ = [
     "load_checkpoint",
     "train_with_early_stopping",
     "_run_epoch",
+
+    # correlation functions
+    "C_m1m2_sym_def",
+    "C_m1m2_sym",
+    "C_mm",
+    "second_moment_analytical",
+    "dens_dens_corr_func",
+    "dens_dens_corr_func_sym",
+    "make_symmetric",
 ]
