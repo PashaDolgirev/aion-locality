@@ -182,7 +182,7 @@ class ExpMixtureRSNonLocalKernelDCT(nn.Module):
         self.amplitudes = nn.Parameter(amps)
 
         # Log-sigmas so sigma_n = softplus(log_sigma_n) > 0
-        init_sigmas = 10.0 + 20.0 * torch.arange(n_components)
+        init_sigmas = 30.0 + 20.0 * torch.arange(n_components)
         log_sigmas = torch.log(torch.expm1(init_sigmas))  # inverse softplus, so softplus(raw)=init_sigma
         self.log_sigmas = nn.Parameter(log_sigmas)
 
