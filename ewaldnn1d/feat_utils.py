@@ -85,6 +85,7 @@ def compute_normalization_stats(features):
     
     return mean_feat, std_feat
 
+
 def normalize_features(features, mean_feat, std_feat):
     """
     Normalize features using provided or computed statistics
@@ -102,6 +103,7 @@ def normalize_features(features, mean_feat, std_feat):
     normalized_features = (features - mean_feat) / std_feat
 
     return normalized_features
+
 
 def generate_loc_features_rs(rho: torch.Tensor, N_feat=2) -> torch.Tensor:
     """
