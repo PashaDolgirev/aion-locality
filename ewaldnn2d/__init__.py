@@ -8,6 +8,7 @@ from .feat_utils import (
     generate_loc_features_ms,
 )
 
+
 # --- DCT utilities ---
 from .dct_utils import (
     rho_to_cosine_coeffs,
@@ -17,6 +18,7 @@ from .dct_utils import (
     kernel_eigenvals_dct,
     kernel_from_eigenvals_dct,
 )
+
 
 # --- Analytic kernels and energy routines ---
 from .energies_utils import (
@@ -29,6 +31,28 @@ from .energies_utils import (
     E_int_rs_dct,
     E_int_ms_dct,
 )
+
+
+# --- Linear convolutional kernels ---
+from .linear_kernels import (
+    LearnableRSKernelConv2d,
+)
+
+
+# --- Linear energy models ---
+from .linear_energy_models import (
+    RSKernelOnlyEnergyNN,
+)
+
+
+# --- Training utilities ---
+from .training_utils import (
+    evaluate,
+    load_checkpoint,
+    _run_epoch,
+    train_with_early_stopping,
+)
+
 
 __all__ = [
     # Features
@@ -56,4 +80,16 @@ __all__ = [
     "E_int_conv",
     "E_int_rs_dct",
     "E_int_ms_dct",
+
+    # linear kernels
+    "LearnableRSKernelConv2d",
+
+    # linear energy models
+    "RSKernelOnlyEnergyNN",
+
+    # training utils
+    "evaluate",
+    "load_checkpoint",
+    "train_with_early_stopping",
+    "_run_epoch",
 ]

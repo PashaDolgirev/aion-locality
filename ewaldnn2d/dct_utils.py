@@ -76,11 +76,10 @@ def cosine_coeffs_to_rho(a_batch: torch.Tensor) -> torch.Tensor:
 def kernel_eigenvals_transform(K: torch.Tensor) -> torch.Tensor:
     """
     Compute 1D convolution eigenvalues for kernel K using DCT-I, along the last dimension.
-
+    Adopted from ewaldnn1d/dct_utils.py
+    
     K: (..., N) real tensor, kernel values at r = 0,...,N-1
        (assumed even in that dimension: K_r = K_{-r}).
-    
-    Adopted from ewaldnn1d/dct_utils.py
 
     Returns:
         lam_K: (..., N) real tensor, eigenvalues λ_m along the last dim
@@ -106,6 +105,7 @@ def kernel_eigenvals_transform(K: torch.Tensor) -> torch.Tensor:
 def kernel_from_eigenvals_transform(lam_K: torch.Tensor) -> torch.Tensor:
     """
     Invert kernel_eigenvals_transform along the last dimension.
+    Adopted from ewaldnn1d/dct_utils.py
 
     Given convolution eigenvalues lam_K (λ_m) along the last axis,
     reconstruct the 1D kernel K(r), r = 0,...,N-1, along that axis.

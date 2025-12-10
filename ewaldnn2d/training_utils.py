@@ -41,7 +41,7 @@ def load_checkpoint(path, model_class, device="cpu"):
 
     Args:
         path: path to .pt file
-        model_class: class object (e.g. HybridKernelEnergyNN)
+        model_class: class object (e.g. RSKernelOnlyEnergyNN)
         device: "cpu" or "cuda"
 
     Returns:
@@ -141,25 +141,21 @@ def train_with_early_stopping(
     min_delta: float = 1e-5,
     ckpt_dir: str = "checkpoints",
     run_name: str | None = None,
-    learning_regime: str = "window",
-    N_grid: int | None = None,
+    learning_regime: str = "rs_window",
+    N_x: int | None = None,
+    N_y: int | None = None,
     device: str = "cpu",
 ):
     """
     Generic training loop with early stopping + checkpoint saving.
 
-    learning_regime:
-        "window"            -> KernelOnlyEnergyNN
-        "gaussmixt"         -> GaussianMixtureEnergyNN
-        "dct_rs_blind"      -> DCTKernelEnergyNN (real-space blind)
-        "dct_exp_rs_mixture"-> DCTKernelEnergyNN (exp-mixture RS)
-        "dct_ms_blind"      -> DCTKernelEnergyNN (MS blind)
-        "hybrid"            -> HybridKernelEnergyNN
+    learning_regime (linear models):
+        "rs_window"         -> RSKernelOnlyEnergyNN
     """
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    if N_grid is None:
-        raise ValueError("N_grid must be provided to train_with_early_stopping.")
+    if N_x is None or N_y is None:
+        raise ValueError("Both N_x and N_y must be provided to train_with_early_stopping.")
 
     best_val = math.inf
     best_state = None
@@ -170,7 +166,7 @@ def train_with_early_stopping(
 
     for epoch in range(1, max_epochs + 1):
         train_loss = _run_epoch(model, train_loader, criterion, optimizer, device, train=True)
-        val_loss   = _run_epoch(model, val_loader,   criterion, optimizer, device, train=False)
+        val_loss   = _run_epoch(model, val_loader, criterion, optimizer, device, train=False)
 
         hist["train_loss"].append(train_loss)
         hist["val_loss"].append(val_loss)
@@ -186,41 +182,10 @@ def train_with_early_stopping(
             since_improved = 0
 
             # -------- build config dict for reconstructing the model ----------
-            if learning_regime == "window":
+            if learning_regime == "rs_window":
                 config = {
                     "R": model.R,
                     "pad_mode": model.kernel_conv.pad_mode,
-                }
-            elif learning_regime == "gaussmixt":
-                config = {
-                    "R": model.R,
-                    "n_components": model.kernel_conv.n_components,
-                    "pad_mode": model.kernel_conv.pad_mode,
-                }
-            elif learning_regime == "dct_rs_blind":
-                config = {
-                    "N": int(N_grid),
-                    "learning_mode": "dct_rs_blind",
-                    "zero_r_flag": model.nonlocal_kernel.zero_r_flag,
-                }
-            elif learning_regime == "dct_exp_rs_mixture":
-                config = {
-                    "N": int(N_grid),
-                    "learning_mode": "dct_exp_rs_mixture",
-                    "zero_r_flag": model.nonlocal_kernel.zero_r_flag,
-                    "n_components": model.nonlocal_kernel.n_components,
-                }
-            elif learning_regime == "dct_ms_blind":
-                config = {
-                    "N": int(N_grid),
-                    "learning_mode": "dct_ms_blind",
-                    "range_ms": model.nonlocal_kernel.range_ms,
-                }
-            elif learning_regime == "hybrid":
-                config = {
-                    "N": int(N_grid),
-                    "R": model.R,
-                    "n_exp_components": model.n_exp_components,
                 }
             else:
                 raise ValueError(f"Unknown learning_regime: {learning_regime}")
@@ -238,7 +203,8 @@ def train_with_early_stopping(
                     "std_feat":  model.std_feat.detach().cpu(),
                     "E_mean":    model.E_mean.detach().cpu(),
                     "E_std":     model.E_std.detach().cpu(),
-                    "N_grid":    int(N_grid),
+                    "N_x":    int(N_x),
+                    "N_y":    int(N_y),
                 }
 
             ckpt_path = os.path.join(ckpt_dir, f"{run_name}_best.pt")
