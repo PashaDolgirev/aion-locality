@@ -1,6 +1,10 @@
 # feat_utils.py
 import torch
-
+from typing import Callable
+EnergyFunction = Callable[
+    [torch.Tensor, torch.Tensor, torch.Tensor],
+    torch.Tensor
+]
 def sample_density(std_harm: torch.Tensor,
                    DM_x: torch.Tensor,
                    DerDM_x: torch.Tensor,
@@ -142,3 +146,46 @@ def generate_loc_features_ms(d_rho_x: torch.Tensor, d_rho_y: torch.Tensor, N_pow
         for k_y in range(1, N_pow + 1):
             features.append((d_rho_x.unsqueeze(-1) ** k_x) * (d_rho_y.unsqueeze(-1) ** k_y))
     return torch.cat(features, dim=-1)
+
+
+def generate_data_2d(
+        N: int,                     #number of samples
+        N_batch: int,               #batch size
+        E_tot: EnergyFunction,      #total energy function
+        std_harm: torch.Tensor,
+        DM_x: torch.Tensor, 
+        DerDM_x: torch.Tensor, 
+        DM_y: torch.Tensor, 
+        DerDM_y: torch.Tensor
+        ):
+    """
+    Generate dataset of density profiles and corresponding total energies
+    Done in mini-batches of size N_batch to save memory
+    """
+    rho_list = []
+    d_rho_x_list = []
+    d_rho_y_list = []
+    a_list = []
+    E_list = []
+
+    num_iter = (N + N_batch - 1) // N_batch
+    with torch.no_grad():
+        for i in range(num_iter):
+            current_batch_size = min(N_batch, N - i * N_batch)
+            rho_batch, d_rho_x_batch, d_rho_y_batch, a_batch = sample_density_batch(
+                current_batch_size, std_harm=std_harm, DM_x=DM_x, DerDM_x=DerDM_x, DM_y=DM_y, DerDM_y=DerDM_y)
+            E_batch = E_tot(rho_batch, d_rho_x_batch, d_rho_y_batch)  # (B,)
+
+            rho_list.append(rho_batch)
+            d_rho_x_list.append(d_rho_x_batch)
+            d_rho_y_list.append(d_rho_y_batch)
+            a_list.append(a_batch)
+            E_list.append(E_batch)
+
+        rho_all = torch.cat(rho_list, dim=0)
+        d_rho_x_all = torch.cat(d_rho_x_list, dim=0)
+        d_rho_y_all = torch.cat(d_rho_y_list, dim=0)
+        a_all = torch.cat(a_list, dim=0)
+        E_all = torch.cat(E_list, dim=0)
+
+    return rho_all, d_rho_x_all, d_rho_y_all, a_all, E_all

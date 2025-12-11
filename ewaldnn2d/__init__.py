@@ -6,6 +6,7 @@ from .feat_utils import (
     normalize_features,
     generate_loc_features_rs,
     generate_loc_features_ms,
+    generate_data_2d,
 )
 
 
@@ -62,6 +63,7 @@ __all__ = [
     "normalize_features",
     "generate_loc_features_rs",
     "generate_loc_features_ms",
+    "generate_data_2d",
 
     # DCT utils
     "rho_to_cosine_coeffs",
