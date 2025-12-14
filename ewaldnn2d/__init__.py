@@ -51,6 +51,13 @@ from .linear_energy_models import (
 )
 
 
+# --- Neural network energy models ---
+from .nn_energy_models import (
+    LocalNN2d,
+    LERN2d,
+)
+
+
 # --- Training utilities ---
 from .training_utils import (
     evaluate,
@@ -104,4 +111,8 @@ __all__ = [
     "load_checkpoint",
     "train_with_early_stopping",
     "_run_epoch",
+
+    # nn energy models
+    "LocalNN2d",
+    "LERN2d",
 ]
