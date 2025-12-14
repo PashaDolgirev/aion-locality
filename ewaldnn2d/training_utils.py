@@ -150,7 +150,11 @@ def train_with_early_stopping(
     Generic training loop with early stopping + checkpoint saving.
 
     learning_regime (linear models):
-        "rs_window"         -> RSKernelOnlyEnergyNN
+        "rs_window"             -> RSKernelOnlyEnergyNN     # real space window kernel
+        "dct_rs_blind"          -> DCTKernelEnergyNN        # learnable real space kernel using DCT routines
+        "dct_ms_blind"          -> DCTKernelEnergyNN        # learnable momentum space kernel using DCT routines
+        "dct_exp_rs_mixture"    -> DCTKernelEnergyNN        # real-space exponential mixture using DCT routines
+        "dct_coulomb"           -> DCTKernelEnergyNN        # screened Coulomb kernel using DCT routines
     """
     os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -186,7 +190,38 @@ def train_with_early_stopping(
                 config = {
                     "R": model.R,
                     "pad_mode": model.kernel_conv.pad_mode,
+                    "learning_mode": learning_regime,
                 }
+            elif learning_regime == "dct_rs_blind":
+                config = {
+                    "N_x": N_x,
+                    "N_y": N_y,
+                    "learning_mode": learning_regime,
+                    "zero_r_flag": model.nonlocal_kernel.zero_r_flag,
+                    "range_rs": model.range_rs,
+                }
+            elif learning_regime == "dct_exp_rs_mixture":
+                config = {
+                    "N_x": N_x,
+                    "N_y": N_y,
+                    "learning_mode": learning_regime,
+                    "zero_r_flag": model.nonlocal_kernel.zero_r_flag,
+                    "n_components": model.nonlocal_kernel.amplitudes.shape[0],
+                }
+            elif learning_regime == "dct_ms_blind":
+                config = {
+                    "N_x": N_x,
+                    "N_y": N_y,
+                    "learning_mode": learning_regime,
+                    "range_ms": model.nonlocal_kernel.range_ms,
+                }
+            elif learning_regime == "dct_coulomb":
+                config = {
+                    "N_x": N_x,
+                    "N_y": N_y,
+                    "learning_mode": learning_regime,
+                }
+            
             else:
                 raise ValueError(f"Unknown learning_regime: {learning_regime}")
 

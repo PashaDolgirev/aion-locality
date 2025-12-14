@@ -37,12 +37,17 @@ from .energies_utils import (
 # --- Linear convolutional kernels ---
 from .linear_kernels import (
     LearnableRSKernelConv2d,
+    LearnableRSNonLocalKernelDCT,
+    LearnableMSNonLocalKernelDCT,
+    ExpMixtureRSNonLocalKernelDCT,
+    ScreenedCoulombNonLocalKernelDCT,
 )
 
 
 # --- Linear energy models ---
 from .linear_energy_models import (
     RSKernelOnlyEnergyNN,
+    DCTKernelEnergyNN,
 )
 
 
@@ -85,9 +90,14 @@ __all__ = [
 
     # linear kernels
     "LearnableRSKernelConv2d",
+    "LearnableRSNonLocalKernelDCT",
+    "LearnableMSNonLocalKernelDCT",
+    "ExpMixtureRSNonLocalKernelDCT",
+    "ScreenedCoulombNonLocalKernelDCT",
 
     # linear energy models
     "RSKernelOnlyEnergyNN",
+    "DCTKernelEnergyNN",
 
     # training utils
     "evaluate",
