@@ -215,7 +215,7 @@ class ScreenedCoulombNonLocalKernelDCT(nn.Module):
         q_vals = torch.sqrt(q_x**2 + q_y**2)  # (N_x, N_y)
 
         self.register_buffer("q_vals", q_vals)
-        self.amp = nn.Parameter(torch.randn() * 0.01)
+        self.amp = nn.Parameter(torch.randn(1) * 0.01)
         self.raw_qs = nn.Parameter(torch.tensor(1.0))
 
     def forward(self, rho: torch.Tensor) -> torch.Tensor:
