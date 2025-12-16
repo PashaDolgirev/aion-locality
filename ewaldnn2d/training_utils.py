@@ -155,6 +155,9 @@ def train_with_early_stopping(
         "dct_ms_blind"          -> DCTKernelEnergyNN        # learnable momentum space kernel using DCT routines
         "dct_exp_rs_mixture"    -> DCTKernelEnergyNN        # real-space exponential mixture using DCT routines
         "dct_coulomb"           -> DCTKernelEnergyNN        # screened Coulomb kernel using DCT routines
+
+    learning_regime (neural networks):
+        "LERN2d"                -> LERN2d                   # Local Energy Reweighting Network
     """
     os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -220,6 +223,15 @@ def train_with_early_stopping(
                     "N_x": N_x,
                     "N_y": N_y,
                     "learning_mode": learning_regime,
+                }
+            elif learning_regime == "LERN2d":
+                config = {
+                    "N_x": N_x,
+                    "N_y": N_y,
+                    "N_energy_terms": model.N_energy_terms,
+                    "N_feat": model.N_feat,
+                    "n_hidden": model.n_hidden,
+                    "n_neurons": model.n_neurons,
                 }
             
             else:

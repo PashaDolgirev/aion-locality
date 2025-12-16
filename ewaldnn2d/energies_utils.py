@@ -192,7 +192,7 @@ def E_int_rs_dct(
     return E.squeeze(0) if E.numel() == 1 else E
 
 
-def E_int_ms_dct(rho, kernel: str, **kwargs):
+def E_int_ms_dct(rho, kernel: str, eng_dens_flag: bool = False, **kwargs) -> torch.Tensor:
     """
     Interaction energy using DCT-I eigenvalues of the convolution operator.
 
@@ -229,5 +229,10 @@ def E_int_ms_dct(rho, kernel: str, **kwargs):
     a = rho_to_cosine_coeffs(rho)                     # (B, N_x, N_y)
     u = cosine_coeffs_to_rho(lam_K.unsqueeze(0) * a)  # (B, N_x, N_y)
 
-    E = 0.5 * (rho * u).sum(dim=(-2, -1)) / (N_x * N_y)
+    E_loc = 0.5 * rho * u # (B, N_x, N_y)
+
+    if eng_dens_flag:
+        return E_loc.unsqueeze(-1)  # (B, N_x, N_y, 1)
+
+    E = E_loc.sum(dim=(-2, -1)) / (N_x * N_y)
     return E.squeeze(0) if E.numel() == 1 else E

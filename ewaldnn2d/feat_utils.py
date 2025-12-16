@@ -1,10 +1,17 @@
 # feat_utils.py
 import torch
 from typing import Callable
+
 EnergyFunction = Callable[
     [torch.Tensor, torch.Tensor, torch.Tensor],
     torch.Tensor
 ]
+LocEnergyFunction = Callable[
+    [torch.Tensor, torch.Tensor, torch.Tensor, bool],
+    torch.Tensor
+]
+
+
 def sample_density(std_harm: torch.Tensor,
                    DM_x: torch.Tensor,
                    DerDM_x: torch.Tensor,
@@ -147,11 +154,33 @@ def generate_loc_features_ms(d_rho_x: torch.Tensor, d_rho_y: torch.Tensor, N_pow
             features.append((d_rho_x.unsqueeze(-1) ** k_x) * (d_rho_y.unsqueeze(-1) ** k_y))
     return torch.cat(features, dim=-1)
 
+def extend_features_neighbors_2d(features: torch.Tensor, R: float = 1.0) -> torch.Tensor:
+    """
+    Extend features by including neighboring grid points within radius R
+    Args:
+        features: torch.Tensor of shape (B, N_x, N_y, N_feat)
+        R: float, radius of neighborhood in grid points
+    """
+    B, N_x, N_y, N_feat = features.shape
+    pad_size = int(R)
+    padded_features = torch.nn.functional.pad(features.permute(0, 3, 1, 2), (pad_size, pad_size, pad_size, pad_size), mode='reflect')
+    extended_features_list = []
+
+    for dx in range(-pad_size, pad_size + 1):
+        for dy in range(-pad_size, pad_size + 1):
+            if (dx == 0 and dy == 0) or (dx**2 + dy**2 > R**2):
+                continue
+            shifted_features = padded_features[:, :, pad_size + dx:pad_size + dx + N_x, pad_size + dy:pad_size + dy + N_y]
+            extended_features_list.append(shifted_features.permute(0, 2, 3, 1))
+
+    extended_features = torch.cat(extended_features_list, dim=-1)
+    return torch.cat([features, extended_features], dim=-1)
+
 
 def generate_data_2d(
-        N: int,                     #number of samples
-        N_batch: int,               #batch size
-        E_tot: EnergyFunction,      #total energy function
+        N: int,                     # number of samples
+        N_batch: int,               # batch size
+        E_tot: EnergyFunction,      # total energy function
         std_harm: torch.Tensor,
         DM_x: torch.Tensor, 
         DerDM_x: torch.Tensor, 
@@ -189,3 +218,52 @@ def generate_data_2d(
         E_all = torch.cat(E_list, dim=0)
 
     return rho_all, d_rho_x_all, d_rho_y_all, a_all, E_all
+
+
+def generate_SC_data_2d(
+        N: int,                         # number of samples
+        N_batch: int,                   # batch size
+        E_HF: LocEnergyFunction,        # unscreened total energy function
+        E_SC: LocEnergyFunction,        # screened total energy function
+        std_harm: torch.Tensor,
+        DM_x: torch.Tensor, 
+        DerDM_x: torch.Tensor, 
+        DM_y: torch.Tensor, 
+        DerDM_y: torch.Tensor
+        ):
+    """
+    Generate dataset of density profiles and corresponding total energies
+    Done in mini-batches of size N_batch to save memory
+    """
+    rho_list = []
+    d_rho_x_list = []
+    d_rho_y_list = []
+    a_list = []
+    E_HF_list = []
+    E_loc_SC_list = []
+
+    num_iter = (N + N_batch - 1) // N_batch
+    with torch.no_grad():
+        for i in range(num_iter):
+            current_batch_size = min(N_batch, N - i * N_batch)
+            rho_batch, d_rho_x_batch, d_rho_y_batch, a_batch = sample_density_batch(
+                current_batch_size, std_harm=std_harm, DM_x=DM_x, DerDM_x=DerDM_x, DM_y=DM_y, DerDM_y=DerDM_y)
+            
+            E_HF_batch = E_HF(rho_batch, d_rho_x_batch, d_rho_y_batch, eng_dens_flag=False)  # (B,)
+            E_loc_SC_batch = E_SC(rho_batch, d_rho_x_batch, d_rho_y_batch, eng_dens_flag=True)  # (B, N_x, N_y, 1)
+
+            rho_list.append(rho_batch)
+            d_rho_x_list.append(d_rho_x_batch)
+            d_rho_y_list.append(d_rho_y_batch)
+            a_list.append(a_batch)
+            E_HF_list.append(E_HF_batch)
+            E_loc_SC_list.append(E_loc_SC_batch)
+
+        rho_all = torch.cat(rho_list, dim=0)
+        d_rho_x_all = torch.cat(d_rho_x_list, dim=0)
+        d_rho_y_all = torch.cat(d_rho_y_list, dim=0)
+        a_all = torch.cat(a_list, dim=0)
+        E_HF_all = torch.cat(E_HF_list, dim=0)
+        E_loc_SC_all = torch.cat(E_loc_SC_list, dim=0)
+
+    return rho_all, d_rho_x_all, d_rho_y_all, a_all, E_HF_all, E_loc_SC_all
