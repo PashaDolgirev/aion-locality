@@ -12,6 +12,16 @@ LocEnergyFunction = Callable[
 ]
 
 
+from .dct_utils import (
+    rho_to_cosine_coeffs,
+    cosine_coeffs_to_rho,
+)
+
+
+from .energies_utils import (
+    Lam_K_Coulomb,
+)
+
 def sample_density(std_harm: torch.Tensor,
                    DM_x: torch.Tensor,
                    DerDM_x: torch.Tensor,
@@ -239,8 +249,8 @@ def generate_SC_data_2d(
     d_rho_x_list = []
     d_rho_y_list = []
     a_list = []
-    E_HF_list = []
-    E_loc_SC_list = []
+    E_loc_HF_list = []
+    E_SC_list = []
 
     num_iter = (N + N_batch - 1) // N_batch
     with torch.no_grad():
@@ -249,21 +259,81 @@ def generate_SC_data_2d(
             rho_batch, d_rho_x_batch, d_rho_y_batch, a_batch = sample_density_batch(
                 current_batch_size, std_harm=std_harm, DM_x=DM_x, DerDM_x=DerDM_x, DM_y=DM_y, DerDM_y=DerDM_y)
             
-            E_HF_batch = E_HF(rho_batch, d_rho_x_batch, d_rho_y_batch, eng_dens_flag=False)  # (B,)
-            E_loc_SC_batch = E_SC(rho_batch, d_rho_x_batch, d_rho_y_batch, eng_dens_flag=True)  # (B, N_x, N_y, 1)
+            E_loc_HF_batch = E_HF(rho_batch, d_rho_x_batch, d_rho_y_batch, eng_dens_flag=True)  # (B, N_x, N_y, 1)
+            E_SC_batch = E_SC(rho_batch, d_rho_x_batch, d_rho_y_batch, eng_dens_flag=False)  # (B,)
 
             rho_list.append(rho_batch)
             d_rho_x_list.append(d_rho_x_batch)
             d_rho_y_list.append(d_rho_y_batch)
             a_list.append(a_batch)
-            E_HF_list.append(E_HF_batch)
-            E_loc_SC_list.append(E_loc_SC_batch)
+            E_loc_HF_list.append(E_loc_HF_batch)
+            E_SC_list.append(E_SC_batch)
 
         rho_all = torch.cat(rho_list, dim=0)
         d_rho_x_all = torch.cat(d_rho_x_list, dim=0)
         d_rho_y_all = torch.cat(d_rho_y_list, dim=0)
         a_all = torch.cat(a_list, dim=0)
-        E_HF_all = torch.cat(E_HF_list, dim=0)
-        E_loc_SC_all = torch.cat(E_loc_SC_list, dim=0)
+        E_HF_all = torch.cat(E_loc_HF_list, dim=0)
+        E_SC_all = torch.cat(E_SC_list, dim=0)
 
-    return rho_all, d_rho_x_all, d_rho_y_all, a_all, E_HF_all, E_loc_SC_all
+    return rho_all, d_rho_x_all, d_rho_y_all, a_all, E_HF_all, E_SC_all
+
+
+def E_kin_custom(
+        rho: torch.Tensor, 
+        d_rho_x: torch.Tensor, 
+        d_rho_y: torch.Tensor, 
+        alpha: float, 
+        beta: float, 
+        qs: float,
+        eng_dens_flag: bool = False
+        ) -> torch.Tensor:
+    """
+    Kinetic energy functional:
+        E_kin = 1 / (2 N_x  N_y) sum_{ij} kappa_{ij} (d_rho_x_{ij}^2 + d_rho_y_{ij}^2),
+        where kappa_{ij} = 1 + alpha * rho_{r + ex} * rho_{r + ey} * rho_{r - ex} * rho_{r - ey} + beta * phi_{ij},
+        phi_ij is the mediator field, with screening length set by qs
+
+    Args:
+        rho:      (N_x, N_y) or (B, N_x, N_y)
+        d_rho_x:  (N_x, N_y) or (B, N_x, N_y) - derivative of rho w.r.t. x
+        d_rho_y:  (N_x, N_y) or (B, N_x, N_y) - derivative of rho w.r.t. y
+    """
+
+    if rho.dim() == 2:
+        rho = rho.unsqueeze(0)
+        d_rho_x = d_rho_x.unsqueeze(0)
+        d_rho_y = d_rho_y.unsqueeze(0)
+    
+    B, N_x, N_y = rho.shape
+    device, dtype = rho.device, rho.dtype
+
+    
+    R_feat = 1.0 # radius for neighbor feature extension
+    rho_neighbours = extend_features_neighbors_2d(rho.unsqueeze(-1), R=R_feat) # (B, N_x, N_y, N_nb), N_nb = number of neighbors within R_feat
+
+    # rho_{r + ex} * rho_{r + ey} * rho_{r - ex} * rho_{r - ey}
+    alpha_term = rho_neighbours[:,:,:,1] * \
+                    rho_neighbours[:,:,:,2] * \
+                    rho_neighbours[:,:,:,3] * \
+                    rho_neighbours[:,:,:,4] # (B, N_x, N_y) 
+    
+    # compute mediator field phi using DCT routines
+    m_vals = torch.arange(0, N_x, device=device, dtype=dtype)
+    n_vals = torch.arange(0, N_y, device=device, dtype=dtype)
+    q_x = torch.pi * m_vals.view(-1, 1) / (N_x - 1)
+    q_y = torch.pi * n_vals.view(1, -1) / (N_y - 1)
+    q_vals = torch.sqrt(q_x**2 + q_y**2)  # (N_x, N_y)
+
+    lam_K = Lam_K_Coulomb(q_vals, qs=qs).to(device=device, dtype=dtype)  # (N_x, N_y)
+
+    a = rho_to_cosine_coeffs(rho)                     # (B, N_x, N_y)
+    phi = cosine_coeffs_to_rho(lam_K.unsqueeze(0) * a)  # (B, N_x, N_y)
+
+    kappa = 1.0 + alpha * alpha_term + beta * phi # (B, N_x, N_y)
+
+    E_kin_loc = 0.5 * kappa * (d_rho_x ** 2 + d_rho_y ** 2)  # (B, N_x, N_y)
+    if eng_dens_flag:
+        return E_kin_loc  # (B, N_x, N_y)
+
+    return E_kin_loc.sum(dim=(1,2)) / (N_x * N_y) # (B,)

@@ -234,5 +234,5 @@ def E_int_ms_dct(rho, kernel: str, eng_dens_flag: bool = False, **kwargs) -> tor
     if eng_dens_flag:
         return E_loc.unsqueeze(-1)  # (B, N_x, N_y, 1)
 
-    E = E_loc.sum(dim=(-2, -1)) / (N_x * N_y)
+    E = E_loc.sum(dim=(-2, -1)) / (N_x * N_y) # (B,)
     return E.squeeze(0) if E.numel() == 1 else E

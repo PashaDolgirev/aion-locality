@@ -9,6 +9,7 @@ from .feat_utils import (
     generate_data_2d,
     generate_SC_data_2d,
     extend_features_neighbors_2d,
+    E_kin_custom,
 )
 
 
@@ -80,6 +81,7 @@ __all__ = [
     "generate_data_2d",
     "generate_SC_data_2d",
     "extend_features_neighbors_2d",
+    "E_kin_custom",
 
     # DCT utils
     "rho_to_cosine_coeffs",
