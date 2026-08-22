@@ -112,7 +112,8 @@ def E_int_conv(
         raise ValueError(f"Unknown kernel: {kernel}")
 
     # ensure batch dim: (B, N_x, N_y, N_z)
-    if rho.dim() == 3:
+    batched = rho.dim() == 4
+    if not batched:
         rho = rho.unsqueeze(0)
     B, N_x, N_y, N_z = rho.shape
     device, dtype = rho.device, rho.dtype
@@ -143,7 +144,7 @@ def E_int_conv(
 
     # E = (1 / 2 N_x N_y N_z) Σ_r rho_r u_r per batch
     E = 0.5 * (rho * u).sum(dim=(-3, -2, -1)) / (N_x * N_y * N_z)  # (B,)
-    return E.squeeze(0) if E.numel() == 1 else E
+    return E if batched else E.squeeze(0)
 
 
 # ---- FFT-based energy (open BCs via zero padding) ----
@@ -178,7 +179,8 @@ def E_int_rs_fft(
     else:
         raise ValueError(f"Unknown kernel: {kernel}")
 
-    if rho.dim() == 3:
+    batched = rho.dim() == 4
+    if not batched:
         rho = rho.unsqueeze(0)
     B, N_x, N_y, N_z = rho.shape
     device, dtype = rho.device, rho.dtype
@@ -190,7 +192,7 @@ def E_int_rs_fft(
     u = conv_fft(rho, lam_K)              # (B, N_x, N_y, N_z)
 
     E = 0.5 * (rho * u).sum(dim=(-3, -2, -1)) / (N_x * N_y * N_z)  # (B,)
-    return E.squeeze(0) if E.numel() == 1 else E
+    return E if batched else E.squeeze(0)
 
 
 def E_int_ms_fft(rho, kernel: str, eng_dens_flag: bool = False, **kwargs) -> torch.Tensor:
@@ -214,7 +216,8 @@ def E_int_ms_fft(rho, kernel: str, eng_dens_flag: bool = False, **kwargs) -> tor
     else:
         raise ValueError(f"Unknown kernel: {kernel}")
 
-    if rho.dim() == 3:
+    batched = rho.dim() == 4
+    if not batched:
         rho = rho.unsqueeze(0)
     B, N_x, N_y, N_z = rho.shape
     device, dtype = rho.device, rho.dtype
@@ -230,4 +233,4 @@ def E_int_ms_fft(rho, kernel: str, eng_dens_flag: bool = False, **kwargs) -> tor
         return E_loc.unsqueeze(-1)  # (B, N_x, N_y, N_z, 1)
 
     E = E_loc.sum(dim=(-3, -2, -1)) / (N_x * N_y * N_z) # (B,)
-    return E.squeeze(0) if E.numel() == 1 else E
+    return E if batched else E.squeeze(0)

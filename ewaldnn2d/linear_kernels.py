@@ -85,11 +85,10 @@ class LearnableRSNonLocalKernelDCT(nn.Module):
         self.N_x = N_x
         self.N_y = N_y
         self.R = R
+        self.rs_kernel = nn.Parameter(torch.randn(N_x, N_y) * 0.01)  # full kernel K_r, r=0..N_grid-1
         if zero_r_flag:
-            self.rs_kernel = nn.Parameter(torch.randn(N_x, N_y) * 0.01)  # full kernel K_r, r=0..N_grid-1
-            self.rs_kernel[0, 0] = 0.0    # enforce K_{0,0} = 0
-        else:
-            self.rs_kernel = nn.Parameter(torch.randn(N_x, N_y) * 0.01) # full kernel K_r, r=0..N_grid-1
+            with torch.no_grad():
+                self.rs_kernel[0, 0] = 0.0    # enforce K_{0,0} = 0
         
         # create a mask to enforce the range R
         rx = torch.arange(N_x).view(-1, 1)   # (N_x, 1)

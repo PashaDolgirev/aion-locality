@@ -165,6 +165,11 @@ class EwaldNN3d(_NormalizedEnergyModel):
         "ms"           - momentum-space amp * 4 pi/(q^2 + qs^2) with uniform
                          mode and self-interaction removed.
 
+    If flag_subtract_H (default True), the reference bare-Coulomb (Hartree)
+    energy of the input density, evaluated in the same representation as the
+    mediator (rs: 1/r; ms: 4 pi/q^2), is subtracted from the physical energy
+    before normalization - the model then targets E_xc rather than VH + E_xc.
+
     Input follows the LERN convention: features packs normalized features in
     features[..., :N_feat] (feature 0 = normalized density) and unnormalized
     energy terms E_a(r) in features[..., N_feat:].
@@ -181,6 +186,7 @@ class EwaldNN3d(_NormalizedEnergyModel):
         n_neurons: int = 16,
         mediator: nn.Module = None,
         mediator_repr: str = "rs",
+        flag_subtract_H: bool = True,
         mean_feat: torch.Tensor = None,
         std_feat: torch.Tensor = None,
         E_mean: torch.Tensor = None,
@@ -195,6 +201,17 @@ class EwaldNN3d(_NormalizedEnergyModel):
         self.n_neurons = n_neurons
         self.N_energy_terms = N_energy_terms
         self.mediator_repr = mediator_repr
+        self.flag_subtract_H = flag_subtract_H
+
+        # reference bare-Coulomb eigenvalues for the Hartree subtraction
+        # (non-persistent: derived from the grid, kept out of checkpoints)
+        if mediator_repr == "rs":
+            lam_H = _yukawa_eigenvals(N_x, N_y, N_z, qs=0.0)
+        elif mediator_repr == "ms":
+            lam_H = Lam_K_Coulomb(q_grid_fft(N_x, N_y, N_z), qs=0.0)
+        else:
+            raise ValueError(f"Unknown mediator_repr: {mediator_repr}")
+        self.register_buffer("lam_H", lam_H, persistent=False)
 
         # mediator: any module mapping rho (B, N_x, N_y, N_z) -> phi (B, N_x, N_y, N_z)
         if mediator is not None:
@@ -233,6 +250,11 @@ class EwaldNN3d(_NormalizedEnergyModel):
 
         E_loc = (factors * energy_terms).sum(dim=-1) + 0.5 * phi * rho  # (B, N_x, N_y, N_z)
         E_tot = E_loc.mean(dim=(1, 2, 3))  # (B,) total physical energy per batch element
+
+        if self.flag_subtract_H:
+            phi_H = conv_fft(rho, self.lam_H.to(dtype=rho.dtype))
+            E_tot = E_tot - (0.5 * phi_H * rho).mean(dim=(1, 2, 3))
+
         E_tot_norm = (E_tot - self.E_mean) / self.E_std
         return E_tot_norm
 
@@ -254,6 +276,11 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
         "rs" (default) - real-space Yukawa exp(-q_m r)/r (bare Coulomb at q_m -> 0);
         "ms"           - momentum-space 4 pi/(q^2 + q_m^2), see Lam_K_Coulomb.
 
+    If flag_subtract_H (default True), the reference bare-Coulomb (Hartree)
+    energy of the input density, evaluated in the same representation as the
+    mediator (rs: 1/r; ms: 4 pi/q^2), is subtracted from the physical energy
+    before normalization - the model then targets E_xc rather than VH + E_xc.
+
     A single LocalNN3d trunk outputs [f-logits (N_energy_terms), A-logit (1),
     s-logits (M)]; f_a = 1 + tanh(.), A = softplus(.), s = softmax(.).
 
@@ -269,6 +296,7 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
         N_feat: int,
         qs_list: list = (0.1, 0.3, 1.0, 3.0),
         mediator_repr: str = "rs",
+        flag_subtract_H: bool = True,
         n_hidden: int = 3,
         n_neurons: int = 16,
         mean_feat: torch.Tensor = None,
@@ -286,19 +314,25 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
         self.N_energy_terms = N_energy_terms
         self.qs_list = list(qs_list)
         self.mediator_repr = mediator_repr
+        self.flag_subtract_H = flag_subtract_H
         M = len(self.qs_list)
         self.M = M
 
         # precompute screened-Coulomb eigenvalues for each fixed q_m: (M, 2N_x, 2N_y, N_z+1)
         if mediator_repr == "rs":
             lam_K = torch.stack([_yukawa_eigenvals(N_x, N_y, N_z, qs) for qs in self.qs_list], dim=0)
+            lam_H = _yukawa_eigenvals(N_x, N_y, N_z, qs=0.0)
         elif mediator_repr == "ms":
             q_vals = q_grid_fft(N_x, N_y, N_z)
             lam_K = torch.stack([Lam_K_Coulomb(q_vals, qs=qs) for qs in self.qs_list], dim=0)
+            lam_H = Lam_K_Coulomb(q_vals, qs=0.0)
         else:
             raise ValueError(f"Unknown mediator_repr: {mediator_repr}")
         self.register_buffer("lam_K", lam_K)
         self.register_buffer("lam_norm", lam_K.abs().amax(dim=(1, 2, 3)))  # (M,) feature normalizers
+        # reference bare-Coulomb eigenvalues for the Hartree subtraction
+        # (non-persistent: derived from the grid, kept out of checkpoints)
+        self.register_buffer("lam_H", lam_H, persistent=False)
 
         # M extra input features: the mediator fields phi_{q_m}
         self.local_nn = LocalNN3d(
@@ -334,5 +368,10 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
 
         E_loc = (factors * energy_terms).sum(dim=-1) + 0.5 * amp * phi_eff * rho  # (B, N_x, N_y, N_z)
         E_tot = E_loc.mean(dim=(1, 2, 3))  # (B,) total physical energy per batch element
+
+        if self.flag_subtract_H:
+            phi_H = conv_fft(rho, self.lam_H.to(dtype=rho.dtype))
+            E_tot = E_tot - (0.5 * phi_H * rho).mean(dim=(1, 2, 3))
+
         E_tot_norm = (E_tot - self.E_mean) / self.E_std
         return E_tot_norm

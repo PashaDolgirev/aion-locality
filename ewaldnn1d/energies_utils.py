@@ -87,7 +87,8 @@ def E_int_conv(
         raise ValueError(f"Unknown kernel: {kernel}")
 
     # ensure batch dim
-    if rho.dim() == 1:
+    batched = rho.dim() == 2
+    if not batched:
         rho = rho.unsqueeze(0)
     B, N = rho.shape
     device, dtype = rho.device, rho.dtype
@@ -108,7 +109,7 @@ def E_int_conv(
         raise ValueError(f"Unknown padding: {pad_mode}")
 
     E = 0.5 * (rho * u).sum(dim=-1) / N  # (B,)
-    return E.squeeze(0) if E.numel() == 1 else E
+    return E if batched else E.squeeze(0)
 
 
 # ---- DCT-based energy ----
@@ -143,7 +144,8 @@ def E_int_dct(
     else:
         raise ValueError(f"Unknown kernel: {kernel}")
 
-    if rho.dim() == 1:
+    batched = rho.dim() == 2
+    if not batched:
         rho = rho.unsqueeze(0)
     B, N = rho.shape
     device, dtype = rho.device, rho.dtype
@@ -156,7 +158,7 @@ def E_int_dct(
     u = cosine_coeffs_to_rho(lam_K.unsqueeze(0) * a) # (B, N)
 
     E = 0.5 * (rho * u).sum(dim=-1) / N  # (B,)
-    return E.squeeze(0) if E.numel() == 1 else E
+    return E if batched else E.squeeze(0)
 
 
 # ---- DCT-based energy with explicit boundary corrections ----
@@ -189,7 +191,8 @@ def E_int_dct_v2(
     else:
         raise ValueError(f"Unknown kernel: {kernel}")
 
-    if rho.dim() == 1:
+    batched = rho.dim() == 2
+    if not batched:
         rho = rho.unsqueeze(0)
     B, N = rho.shape
     device, dtype = rho.device, rho.dtype
@@ -225,4 +228,4 @@ def E_int_dct_v2(
     E_bnd = 0.25 * (rho[:, 0] * sum_spec + rho[:, -1] * sum_spec_signed) / N  # (B,)
 
     E = E_diag + E_bnd
-    return E.squeeze(0) if E.numel() == 1 else E
+    return E if batched else E.squeeze(0)

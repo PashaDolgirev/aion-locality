@@ -105,7 +105,8 @@ def E_int_conv(
         raise ValueError(f"Unknown kernel: {kernel}")
 
     # ensure batch dim: (B, N_x, N_y)
-    if rho.dim() == 2:
+    batched = rho.dim() == 3
+    if not batched:
         rho = rho.unsqueeze(0)
     B, N_x, N_y = rho.shape
     device, dtype = rho.device, rho.dtype
@@ -137,7 +138,7 @@ def E_int_conv(
 
     # E = (1/2N_xN_y) Σ_{i,j} rho_{i,j} u_{i,j} per batch
     E = 0.5 * (rho * u).sum(dim=(-2, -1)) / (N_x * N_y)  # (B,)
-    return E.squeeze(0) if E.numel() == 1 else E
+    return E if batched else E.squeeze(0)
 
 
 # ---- DCT-based energy ----
@@ -173,7 +174,8 @@ def E_int_rs_dct(
     else:
         raise ValueError(f"Unknown kernel: {kernel}")
 
-    if rho.dim() == 2:
+    batched = rho.dim() == 3
+    if not batched:
         rho = rho.unsqueeze(0)
     B, N_x, N_y = rho.shape
     device, dtype = rho.device, rho.dtype
@@ -189,7 +191,7 @@ def E_int_rs_dct(
     u = cosine_coeffs_to_rho(lam_K.unsqueeze(0) * a) # (B, N_x, N_y)
 
     E = 0.5 * (rho * u).sum(dim=(-2, -1)) / (N_x * N_y)  # (B,)
-    return E.squeeze(0) if E.numel() == 1 else E
+    return E if batched else E.squeeze(0)
 
 
 def E_int_ms_dct(rho, kernel: str, eng_dens_flag: bool = False, **kwargs) -> torch.Tensor:
@@ -213,7 +215,8 @@ def E_int_ms_dct(rho, kernel: str, eng_dens_flag: bool = False, **kwargs) -> tor
     else:
         raise ValueError(f"Unknown kernel: {kernel}")
 
-    if rho.dim() == 2:
+    batched = rho.dim() == 3
+    if not batched:
         rho = rho.unsqueeze(0)
     B, N_x, N_y = rho.shape
     device, dtype = rho.device, rho.dtype
@@ -235,4 +238,4 @@ def E_int_ms_dct(rho, kernel: str, eng_dens_flag: bool = False, **kwargs) -> tor
         return E_loc.unsqueeze(-1)  # (B, N_x, N_y, 1)
 
     E = E_loc.sum(dim=(-2, -1)) / (N_x * N_y) # (B,)
-    return E.squeeze(0) if E.numel() == 1 else E
+    return E if batched else E.squeeze(0)

@@ -1,6 +1,7 @@
 import os
 import math
 import copy
+import inspect
 import torch
 import torch.nn as nn
 import csv
@@ -54,6 +55,10 @@ def load_checkpoint(path, model_class, device="cpu"):
     config = ckpt["config"]
     normalization = ckpt.get("normalization", None)
     state_dict = ckpt["model_state_dict"]
+
+    # drop config keys the model does not accept (e.g. "learning_mode" in older checkpoints)
+    accepted = inspect.signature(model_class.__init__).parameters
+    config = {k: v for k, v in config.items() if k in accepted}
 
     # --- reconstruct model with normalization if present ---
     if normalization is not None:
@@ -165,6 +170,7 @@ def train_with_early_stopping(
         raise ValueError("Both N_x and N_y must be provided to train_with_early_stopping.")
 
     best_val = math.inf
+    best_sig_val = math.inf   # last value that improved by more than min_delta (patience gate)
     best_state = None
     best_epoch = -1
     since_improved = 0
@@ -181,19 +187,23 @@ def train_with_early_stopping(
         if scheduler is not None:
             scheduler.step(val_loss)
 
-        improved = (best_val - val_loss) > min_delta
-        if improved:
+        # patience is gated by min_delta, but the checkpoint tracks any strict improvement,
+        # so the saved model is the true best on validation
+        if (best_sig_val - val_loss) > min_delta:
+            best_sig_val = val_loss
+            since_improved = 0
+        else:
+            since_improved += 1
+        if val_loss < best_val:
             best_val = val_loss
             best_state = copy.deepcopy(model.state_dict())
             best_epoch = epoch
-            since_improved = 0
 
             # -------- build config dict for reconstructing the model ----------
             if learning_regime == "rs_window":
                 config = {
                     "R": model.R,
                     "pad_mode": model.kernel_conv.pad_mode,
-                    "learning_mode": learning_regime,
                 }
             elif learning_regime == "dct_rs_blind":
                 config = {
@@ -265,9 +275,6 @@ def train_with_early_stopping(
                 },
                 ckpt_path,
             )
-
-        else:
-            since_improved += 1
 
         if (epoch % 10) == 0 or epoch == 1:
             print(
