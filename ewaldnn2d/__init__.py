@@ -8,7 +8,9 @@ from .feat_utils import (
     generate_loc_features_ms,
     generate_data_2d,
     generate_SC_data_2d,
+    generate_EngFunc_data_2d,
     extend_features_neighbors_2d,
+    kappa_custom,
     E_kin_custom,
 )
 
@@ -58,6 +60,7 @@ from .linear_energy_models import (
 from .nn_energy_models import (
     LocalNN2d,
     LERN2d,
+    EwaldNN2d,
 )
 
 
@@ -80,7 +83,9 @@ __all__ = [
     "generate_loc_features_ms",
     "generate_data_2d",
     "generate_SC_data_2d",
+    "generate_EngFunc_data_2d",
     "extend_features_neighbors_2d",
+    "kappa_custom",
     "E_kin_custom",
 
     # DCT utils
@@ -121,4 +126,5 @@ __all__ = [
     # nn energy models
     "LocalNN2d",
     "LERN2d",
+    "EwaldNN2d",
 ]

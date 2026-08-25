@@ -217,12 +217,24 @@ class ScreenedCoulombNonLocalKernelDCT(nn.Module):
         self.amp = nn.Parameter(torch.randn(1) * 0.01)
         self.raw_qs = nn.Parameter(torch.tensor(1.0))
 
+    def phi_and_feature(self, rho: torch.Tensor):
+        """
+        Returns (phi, phi_feat):
+            phi      = amp * (K_unit * rho), the physical mediator field;
+            phi_feat = (K_unit * rho) / max|lam_unit|, amp-independent.
+        The normalizer depends on model parameters only, never on sample
+        statistics, so the feature map stays strictly local.
+        """
+        qs = F.softplus(self.raw_qs)
+        lam_unit = Lam_K_Coulomb(self.q_vals, qs=qs).to(device=rho.device, dtype=rho.dtype)  # (N_x, N_y)
+        a = rho_to_cosine_coeffs(rho)
+        phi_unit = cosine_coeffs_to_rho(lam_unit.unsqueeze(0) * a)
+        return self.amp * phi_unit, phi_unit / lam_unit.abs().max()
+
     def forward(self, rho: torch.Tensor) -> torch.Tensor:
         """
         rho: (B, N_x, N_y)
         Returns: phi = (K * rho): (B, N_x, N_y)
         """
-        qs = F.softplus(self.raw_qs)
-        lam_K = (self.amp * Lam_K_Coulomb(self.q_vals, qs=qs)).to(device=rho.device, dtype=rho.dtype)  # (N_x, N_y)
-        a = rho_to_cosine_coeffs(rho)
-        return cosine_coeffs_to_rho(lam_K.unsqueeze(0) * a)
+        phi, _ = self.phi_and_feature(rho)
+        return phi

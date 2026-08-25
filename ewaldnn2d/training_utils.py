@@ -163,6 +163,7 @@ def train_with_early_stopping(
 
     learning_regime (neural networks):
         "LERN2d"                -> LERN2d                   # Local Energy Reweighting Network
+        "EwaldNN2d"             -> EwaldNN2d                # EwaldNN with learnable mediator field
     """
     os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -234,7 +235,7 @@ def train_with_early_stopping(
                     "N_y": N_y,
                     "learning_mode": learning_regime,
                 }
-            elif learning_regime == "LERN2d":
+            elif learning_regime in ("LERN2d", "EwaldNN2d"):
                 config = {
                     "N_x": N_x,
                     "N_y": N_y,
@@ -243,7 +244,7 @@ def train_with_early_stopping(
                     "n_hidden": model.n_hidden,
                     "n_neurons": model.n_neurons,
                 }
-            
+
             else:
                 raise ValueError(f"Unknown learning_regime: {learning_regime}")
 
