@@ -16,6 +16,10 @@ LearningNonLocalKernel2d_wDCTKernel_checkpoints/*
 LearningSC2d_checkpoints/*
 Notes/*
 CLAUDE.md
+.DS_Store
 Wigner_crystal.ipynb
 Learning3d_checkpoints/*
 Results_2D/*
+run_exp2*
+exp2*
+LearningEngFunc2d_checkpoints/*
