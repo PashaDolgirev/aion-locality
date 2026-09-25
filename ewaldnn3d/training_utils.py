@@ -259,7 +259,6 @@ def train_with_early_stopping(
                     "N_energy_terms": model.N_energy_terms,
                     "N_feat": model.N_feat,
                     "mediator_repr": model.mediator_repr,
-                    "flag_subtract_H": model.flag_subtract_H,
                     "n_hidden": model.n_hidden,
                     "n_neurons": model.n_neurons,
                 }
@@ -272,7 +271,6 @@ def train_with_early_stopping(
                     "N_feat": model.N_feat,
                     "qs_list": model.qs_list,
                     "mediator_repr": model.mediator_repr,
-                    "flag_subtract_H": model.flag_subtract_H,
                     "n_hidden": model.n_hidden,
                     "n_neurons": model.n_neurons,
                 }

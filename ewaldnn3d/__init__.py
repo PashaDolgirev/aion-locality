@@ -32,6 +32,7 @@ from .energies_utils import (
     K_yukawa,
     K_power,
     Lam_K_Coulomb,
+    Lam_dK_Coulomb,
     E_int_conv,
     E_int_rs_fft,
     E_int_ms_fft,
@@ -46,6 +47,8 @@ from .linear_kernels import (
     ExpMixtureRSNonLocalKernelFFT,
     ScreenedCoulombRSNonLocalKernelFFT,
     ScreenedCoulombNonLocalKernelFFT,
+    DeltaCoulombRSNonLocalKernelFFT,
+    DeltaCoulombNonLocalKernelFFT,
 )
 
 
@@ -102,6 +105,7 @@ __all__ = [
     "K_yukawa",
     "K_power",
     "Lam_K_Coulomb",
+    "Lam_dK_Coulomb",
     "E_int_conv",
     "E_int_rs_fft",
     "E_int_ms_fft",
@@ -113,6 +117,8 @@ __all__ = [
     "ExpMixtureRSNonLocalKernelFFT",
     "ScreenedCoulombRSNonLocalKernelFFT",
     "ScreenedCoulombNonLocalKernelFFT",
+    "DeltaCoulombRSNonLocalKernelFFT",
+    "DeltaCoulombNonLocalKernelFFT",
 
     # linear energy models
     "RSKernelOnlyEnergyNN",

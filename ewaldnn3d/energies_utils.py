@@ -75,6 +75,34 @@ def Lam_K_Coulomb(q: torch.Tensor, qs: float = 0.0, Lambda_UV: float = 1000.0) -
     return lam_K
 
 
+def Lam_dK_Coulomb(q: torch.Tensor, qs: float, Lambda_UV: float = 1000.0) -> torch.Tensor:
+    """
+    Screened-minus-bare Coulomb (delta) kernel in 3D momentum space:
+        lam_dK(q) = 4 pi / (q^2 + qs^2) - 4 pi / q^2 = -4 pi qs^2 / (q^2 (q^2 + qs^2)),
+    evaluated in the analytic difference form (no subtraction of two large kernels),
+    with the same conventions as Lam_K_Coulomb: zero mode and self-interaction
+    removed, and a UV cutoff.
+
+    Mediator fields built from this kernel give the Hartree-subtracted energy
+    directly, avoiding the cancellation of two separately computed large energies.
+
+    q: (2N_x, 2N_y, N_z+1) radial momenta on the padded rfftn grid (see q_grid_fft)
+    """
+    denom = q**2 * (q**2 + qs**2)
+    denom = torch.where(denom == 0, denom + 1e-12, denom)
+    lam_dK = -4.0 * torch.pi * qs**2 / denom
+
+    lam_dK[0, 0, 0] = 0.0 # remove uniform mode
+    lam_dK = lam_dK * (q < Lambda_UV) # UV cutoff
+
+    # go to real space, kill self-interaction, go back
+    K = kernel_from_eigenvals_fft(lam_dK)
+    K[0, 0, 0] = 0.0
+    lam_dK = kernel_eigenvals_fft(K)
+
+    return lam_dK
+
+
 # ---- real-space energy via convolution ----
 
 def E_int_conv(

@@ -11,6 +11,7 @@ from .fft_utils import (
 
 from .energies_utils import (
     Lam_K_Coulomb,
+    Lam_dK_Coulomb,
 )
 
 
@@ -282,3 +283,103 @@ class ScreenedCoulombNonLocalKernelFFT(nn.Module):
         """
         phi, _ = self.phi_and_feature(rho)
         return phi
+
+
+class DeltaCoulombRSNonLocalKernelFFT(nn.Module):
+    """
+    Screened-minus-bare Coulomb (delta) kernel parameterized in REAL space:
+        dK(r) = (exp(-qs * r) - 1) / r,  dK(0) = 0 (no self-interaction),
+    with learnable screening momentum qs, applied via zero-padded FFT routines.
+
+    This is the difference between the Yukawa kernel exp(-qs r)/r and the bare
+    Coulomb 1/r, built analytically (expm1) so that the Hartree subtraction
+    happens at the kernel level - the mediator field dphi = (dK * rho) yields
+    the Hartree-subtracted pairwise energy directly, never as a difference of
+    two separately computed large energies. Note dK has a long-range -1/r tail.
+
+    There is no amplitude parameter: in the EwaldNN models the amplitude is
+    carried by the local reweighting factor a(x_r).
+    """
+    def __init__(self, N_x, N_y, N_z):
+        super().__init__()
+        self.N_x = N_x
+        self.N_y = N_y
+        self.N_z = N_z
+
+        r_vals = displacement_grid(N_x, N_y, N_z)  # (N_x, N_y, N_z)
+        self.register_buffer("r_vals", r_vals)
+        # init qs = 1 (order-unity screening in lattice units, healthy gradients);
+        # the mediator term starts off via the amplitude a(x_r) ~ 0, not via qs -
+        # a near-zero qs sits in a degenerate a*qs valley and traps the optimizer
+        self.raw_qs = nn.Parameter(torch.log(torch.expm1(torch.tensor(1.0))))  # inverse softplus
+
+    def build_kernel(self):
+        """Delta kernel (exp(-qs r) - 1) / r, dK(0) = 0."""
+        qs = F.softplus(self.raw_qs)
+        return torch.expm1(-qs * self.r_vals) / self.r_vals.clamp(min=1.0) * (self.r_vals > 0)
+
+    def build_kernel_screened(self):
+        """Screened companion exp(-qs r) / r, K(0) = 0 (short-range, for the feature)."""
+        qs = F.softplus(self.raw_qs)
+        return torch.exp(-qs * self.r_vals) / self.r_vals.clamp(min=1.0) * (self.r_vals > 0)
+
+    def phi_and_feature(self, rho: torch.Tensor):
+        """
+        Returns (dphi, phi_feat):
+            dphi     = (dK * rho), the delta mediator field entering the energy;
+            phi_feat = (K_screened * rho) / max|lam_screened|, the SCREENED
+                       kernel-weighted density average over the screening cloud.
+        The feature deliberately uses the short-range screened kernel, not dK:
+        the -1/r tail of dK would make the feature map long-range. The
+        normalizer depends on model parameters only, never on sample
+        statistics, so the feature map stays strictly local.
+        """
+        lam_dK = kernel_eigenvals_fft(self.build_kernel()).to(device=rho.device, dtype=rho.dtype)
+        lam_s = kernel_eigenvals_fft(self.build_kernel_screened()).to(device=rho.device, dtype=rho.dtype)
+        return conv_fft(rho, lam_dK), conv_fft(rho, lam_s) / lam_s.abs().max()
+
+    def forward(self, rho: torch.Tensor) -> torch.Tensor:
+        """
+        rho: (B, N_x, N_y, N_z)
+        Returns: dphi = (dK * rho): (B, N_x, N_y, N_z)
+        """
+        dphi, _ = self.phi_and_feature(rho)
+        return dphi
+
+
+class DeltaCoulombNonLocalKernelFFT(nn.Module):
+    """
+    Screened-minus-bare Coulomb (delta) kernel parameterized in MOMENTUM space:
+        lam_dK(q) = -4 pi qs^2 / (q^2 (q^2 + qs^2))  (see Lam_dK_Coulomb),
+    with learnable screening momentum qs, via zero-padded FFT routines.
+    Same contract and rationale as DeltaCoulombRSNonLocalKernelFFT.
+    """
+    def __init__(self, N_x, N_y, N_z):
+        super().__init__()
+        self.N_x = N_x
+        self.N_y = N_y
+        self.N_z = N_z
+
+        q_vals = q_grid_fft(N_x, N_y, N_z)  # (2N_x, 2N_y, N_z+1)
+        self.register_buffer("q_vals", q_vals)
+        # init qs = 1 (see DeltaCoulombRSNonLocalKernelFFT)
+        self.raw_qs = nn.Parameter(torch.log(torch.expm1(torch.tensor(1.0))))  # inverse softplus
+
+    def phi_and_feature(self, rho: torch.Tensor):
+        """
+        Same contract as DeltaCoulombRSNonLocalKernelFFT.phi_and_feature:
+        (dphi, phi_feat) with the feature built from the screened kernel
+        4 pi / (q^2 + qs^2), normalized by its largest eigenvalue magnitude.
+        """
+        qs = F.softplus(self.raw_qs)
+        lam_dK = Lam_dK_Coulomb(self.q_vals, qs=qs).to(device=rho.device, dtype=rho.dtype)
+        lam_s = Lam_K_Coulomb(self.q_vals, qs=qs).to(device=rho.device, dtype=rho.dtype)
+        return conv_fft(rho, lam_dK), conv_fft(rho, lam_s) / lam_s.abs().max()
+
+    def forward(self, rho: torch.Tensor) -> torch.Tensor:
+        """
+        rho: (B, N_x, N_y, N_z)
+        Returns: dphi = (dK * rho): (B, N_x, N_y, N_z)
+        """
+        dphi, _ = self.phi_and_feature(rho)
+        return dphi

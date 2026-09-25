@@ -23,3 +23,19 @@ Results_2D/*
 run_exp2*
 exp2*
 LearningEngFunc2d_checkpoints/*
+# Wigner-crystal examples:
+wc/*
+LearningWC2d_checkpoints/
+.claude/
+Claude outputs/
+*.log
+checkerboard/*
+Ry_checkerboard/*
+# Agentic discovery of equations of motion (hidden mediator field in dynamics):
+agentic_EOM/*
+
+
+
+# 3D checks:
+QM7_Iman/*
+
