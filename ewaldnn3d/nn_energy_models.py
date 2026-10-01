@@ -153,28 +153,28 @@ class LERN3d(_NormalizedEnergyModel):
 
 class EwaldNN3d(_NormalizedEnergyModel):
     """
-    EwaldNN (simple variant), targeting the exchange-correlation energy:
+    For flag_subtract_H = True (default), the EwaldNN (simple variant)
+    targets the exchange-correlation energy as:
         E_xc = (1 / N_x N_y N_z) * sum_r [ sum_a f_a(x_r) * E_a(r)
                + (1/2) a(x_r) dphi_r rho_r ],
-
     where dphi = (dK * rho) is a mediator field built from the density through
     the DELTA kernel dK = K_screened - K_Coulomb with learnable screening
     momentum qs (rs: (exp(-qs r) - 1)/r; ms: -4 pi qs^2 / (q^2 (q^2 + qs^2))).
-    The Hartree subtraction thus happens at the kernel level: the pairwise term
-    (1/2) dphi rho is the Hartree-subtracted interaction energy directly, never
-    a difference of two separately computed large energies. At qs -> 0 the
-    kernel vanishes, so the mediator term is a pure exchange-correlation object.
+    The Hartree subtraction thus happens at the kernel level.
 
-    a(x_r) = softplus(.) > 0 is a local reweighting factor for the mediator
-    term, output by the same trunk as the f_a; it carries the interaction
-    amplitude - the delta kernel itself has none.
+    For flag_subtract_H = False, the energy term uses the UNSUBTRACTED
+    screened field phi = (K_screened * rho) in place of dphi. The feature
+    is unchanged.
+
+    a(x_r) is a local reweighting factor for the mediator term - a raw
+    linear head of either sign, learned from the data.
 
     The feature appended to x_r is the SCREENED kernel-weight-normalized
     density average (see the mediator's phi_and_feature), scaled by the
     density std - short-ranged, unlike dK which has a -1/r tail. All
     normalizers are model parameters or fixed dataset constants - never
     per-sample statistics, which would introduce a spurious nonlocal
-    interaction. The energy term uses the raw delta field.
+    interaction.
 
     mediator_repr selects the kernel representation (ignored if a custom
     mediator module is passed):
@@ -198,6 +198,7 @@ class EwaldNN3d(_NormalizedEnergyModel):
         n_neurons: int = 16,
         mediator: nn.Module = None,
         mediator_repr: str = "rs",
+        flag_subtract_H: bool = True,
         mean_feat: torch.Tensor = None,
         std_feat: torch.Tensor = None,
         E_mean: torch.Tensor = None,
@@ -212,6 +213,7 @@ class EwaldNN3d(_NormalizedEnergyModel):
         self.n_neurons = n_neurons
         self.N_energy_terms = N_energy_terms
         self.mediator_repr = mediator_repr
+        self.flag_subtract_H = flag_subtract_H
 
         # mediator: any module mapping rho (B, N_x, N_y, N_z) -> dphi (B, N_x, N_y, N_z)
         if mediator is not None:
@@ -232,34 +234,48 @@ class EwaldNN3d(_NormalizedEnergyModel):
             N_energy_terms=N_energy_terms + 1,
             raw_output=True,
         )
-        # small amplitude at initialization: zero the a-head weights, bias -2
-        # (a = softplus(-2) ~ 0.13 everywhere at the start)
+
         with torch.no_grad():
             out_layer = self.local_nn.loc_network[-1]
             out_layer.weight[N_energy_terms].zero_()
-            out_layer.bias[N_energy_terms] = -2.0
+            out_layer.bias[N_energy_terms] = 0.1
+
+    def _screened_eigenvals(self) -> torch.Tensor:
+        """Eigenvalues of the mediator's screened companion kernel K_screened
+        at the current qs (for flag_subtract_H=False)."""
+        if isinstance(self.mediator, DeltaCoulombRSNonLocalKernelFFT):
+            return kernel_eigenvals_fft(self.mediator.build_kernel_screened())
+        if isinstance(self.mediator, DeltaCoulombNonLocalKernelFFT):
+            return Lam_K_Coulomb(self.mediator.q_vals, qs=F.softplus(self.mediator.raw_qs))
+        raise RuntimeError("flag_subtract_H=False requires a default delta mediator.")
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         features_orig = features[..., :self.N_feat] # (B, N_x, N_y, N_z, N_feat), normalized features
         energy_terms = features[..., self.N_feat:] # (B, N_x, N_y, N_z, N_energy_terms), physical (unnormalized) energy terms
 
         rho = self._rho_from_features(features_orig)  # (B, N_x, N_y, N_z)
-        if hasattr(self.mediator, "phi_and_feature"):
-            dphi, phi_feat = self.mediator.phi_and_feature(rho)
+        if not self.flag_subtract_H and isinstance(
+                self.mediator, (DeltaCoulombRSNonLocalKernelFFT, DeltaCoulombNonLocalKernelFFT)):
+            # unsubtracted screened field in the energy term; same feature convention
+            lam_s = self._screened_eigenvals().to(device=rho.device, dtype=rho.dtype)
+            phi_med = conv_fft(rho, lam_s)
+            phi_feat = phi_med / lam_s.abs().max()
+        elif hasattr(self.mediator, "phi_and_feature"):
+            phi_med, phi_feat = self.mediator.phi_and_feature(rho)
         else:
-            dphi = self.mediator(rho)  # custom mediator without a feature convention
-            phi_feat = dphi
+            phi_med = self.mediator(rho)  # custom mediator without a feature convention
+            phi_feat = phi_med
         phi_feat = phi_feat / self.std_feat[..., 0]  # scale like the density feature
 
         features_ext = torch.cat([features_orig, phi_feat.unsqueeze(-1)], dim=-1)
         z = self.local_nn(features_ext)  # (B, N_x, N_y, N_z, N_energy_terms + 1), raw
 
         factors = 1.0 + torch.tanh(z[..., :self.N_energy_terms])  # reweighting f_a in [0, 2]
-        a = F.softplus(z[..., self.N_energy_terms])               # mediator reweighting a(x_r) > 0
+        a = z[..., self.N_energy_terms]                           # mediator reweighting a(x_r), either sign
 
         self._check_E_stats()
 
-        E_loc = (factors * energy_terms).sum(dim=-1) + 0.5 * a * dphi * rho  # (B, N_x, N_y, N_z)
+        E_loc = (factors * energy_terms).sum(dim=-1) + 0.5 * a * phi_med * rho  # (B, N_x, N_y, N_z)
         E_tot = E_loc.mean(dim=(1, 2, 3))  # (B,) total physical energy per batch element
 
         E_tot_norm = (E_tot - self.E_mean) / self.E_std
@@ -268,34 +284,29 @@ class EwaldNN3d(_NormalizedEnergyModel):
 
 class EwaldNNExtended3d(_NormalizedEnergyModel):
     """
-    EwaldNN (extended variant), targeting the exchange-correlation energy:
+    For flag_subtract_H = True (default), the EwaldNN (extended variant)
+    targets the exchange-correlation energy as:
         E_xc = (1 / N_x N_y N_z) * sum_r [ sum_a f_a(x_r) * E_a(r)
                + (1/2) a(x_r) sum_m s_m(x_r) dphi_{q_m}(r) rho_r ],
-
     with a fixed set of screening momenta {q_1, ..., q_M}. As in EwaldNN3d,
     the Hartree subtraction happens at the kernel level: the energy uses the
-    DELTA fields dphi_{q_m} = (K_{q_m} - K_Coulomb) * rho. Since the softmax
-    weights sum to 1, sum_m s_m dphi_{q_m} realizes the position-dependent
-    kernel sum_m s_m K_{q_m} - K_Coulomb, i.e. a spatially varying screening
-    with the bare Coulomb subtracted exactly once.
+    DELTA fields dphi_{q_m} = (K_{q_m} - K_Coulomb) * rho.
+
+    When flag_subtract_H is False, the energy uses the UNSUBTRACTED screened
+    fields phi_{q_m} in place of the delta fields - no kernel-level Hartree
+    subtraction. The features are unchanged.
 
     The network outputs the softmax selection s_m(x_r) together with the local
-    mediator reweighting a(x_r) = softplus(.) > 0. The features appended to
-    x_r are the SCREENED fields phi_{q_m} = K_{q_m} * rho (short-ranged; the
-    delta kernels carry a -1/r tail and never enter the feature vector).
-    Both stacks are precomputed eigenvalue-wise at init: 2M global convolutions
-    per forward pass.
+    mediator reweighting a(x_r) - a raw linear head, either sign, learned from
+    the data. The features appended to x_r are the SCREENED fields
+    phi_{q_m} = K_{q_m} * rho (short-ranged; the delta kernels carry a -1/r
+    tail and never enter the feature vector). Both stacks are precomputed
+    eigenvalue-wise at init: 2M global convolutions per forward pass (M when
+    flag_subtract_H=False - the screened fields serve both roles).
 
     mediator_repr selects the kernel representation of the K_{q_m}:
         "rs" (default) - real-space Yukawa exp(-q_m r)/r and delta (exp(-q_m r) - 1)/r;
         "ms"           - momentum-space, see Lam_K_Coulomb / Lam_dK_Coulomb.
-
-    A single LocalNN3d trunk outputs [f-logits (N_energy_terms), a-logit (1),
-    s-logits (M)]; f_a = 1 + tanh(.), a = softplus(.), s = softmax(.).
-    As in EwaldNN3d, the a-head row of the output layer is initialized with
-    zero weights and bias -2 (a ~ 0.13), so the mediator starts small.
-
-    Input follows the LERN convention (see EwaldNN3d).
     """
 
     def __init__(
@@ -307,6 +318,7 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
         N_feat: int,
         qs_list: list = (0.1, 0.3, 1.0, 3.0),
         mediator_repr: str = "rs",
+        flag_subtract_H: bool = True,
         n_hidden: int = 3,
         n_neurons: int = 16,
         mean_feat: torch.Tensor = None,
@@ -324,6 +336,7 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
         self.N_energy_terms = N_energy_terms
         self.qs_list = list(qs_list)
         self.mediator_repr = mediator_repr
+        self.flag_subtract_H = flag_subtract_H
         M = len(self.qs_list)
         self.M = M
 
@@ -350,12 +363,11 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
             N_energy_terms=N_energy_terms + 1 + M,
             raw_output=True,
         )
-        # small amplitude at initialization: zero the a-head weights, bias -2
-        # (a = softplus(-2) ~ 0.13 everywhere at the start)
+        
         with torch.no_grad():
             out_layer = self.local_nn.loc_network[-1]
             out_layer.weight[N_energy_terms].zero_()
-            out_layer.bias[N_energy_terms] = -2.0
+            out_layer.bias[N_energy_terms] = 0.1
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         features_orig = features[..., :self.N_feat] # (B, N_x, N_y, N_z, N_feat), normalized features
@@ -363,28 +375,31 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
 
         rho = self._rho_from_features(features_orig)  # (B, N_x, N_y, N_z)
 
-        # screened phi_{q_m} = K_{q_m} * rho (features) and delta
-        # dphi_{q_m} = (K_{q_m} - K_Coulomb) * rho (energy)
+        # screened phi_{q_m} = K_{q_m} * rho (features) and, if subtracting,
+        # delta dphi_{q_m} = (K_{q_m} - K_Coulomb) * rho (energy)
         phi_stack = torch.stack(
             [conv_fft(rho, self.lam_K[m].to(dtype=rho.dtype)) for m in range(self.M)],
             dim=-1)  # (B, N_x, N_y, N_z, M)
-        dphi_stack = torch.stack(
-            [conv_fft(rho, self.lam_dK[m].to(dtype=rho.dtype)) for m in range(self.M)],
-            dim=-1)  # (B, N_x, N_y, N_z, M)
+        if self.flag_subtract_H:
+            med_stack = torch.stack(
+                [conv_fft(rho, self.lam_dK[m].to(dtype=rho.dtype)) for m in range(self.M)],
+                dim=-1)  # (B, N_x, N_y, N_z, M)
+        else:
+            med_stack = phi_stack  # unsubtracted screened fields in the energy term
 
         phi_feat = (phi_stack / self.lam_norm) / self.std_feat[..., 0]  # per-channel, fixed normalizers
         features_ext = torch.cat([features_orig, phi_feat], dim=-1)
         z = self.local_nn(features_ext)  # (B, N_x, N_y, N_z, N_energy_terms + 1 + M), raw
 
         factors = 1.0 + torch.tanh(z[..., :self.N_energy_terms])   # reweighting f_a in [0, 2]
-        a = F.softplus(z[..., self.N_energy_terms])                # mediator reweighting a(x_r) > 0
+        a = z[..., self.N_energy_terms]                            # mediator reweighting a(x_r), either sign
         s = torch.softmax(z[..., self.N_energy_terms + 1:], dim=-1)  # softmax selection s_m(x_r)
 
-        dphi_eff = (s * dphi_stack).sum(dim=-1)  # (B, N_x, N_y, N_z)
+        phi_med = (s * med_stack).sum(dim=-1)  # (B, N_x, N_y, N_z)
 
         self._check_E_stats()
 
-        E_loc = (factors * energy_terms).sum(dim=-1) + 0.5 * a * dphi_eff * rho  # (B, N_x, N_y, N_z)
+        E_loc = (factors * energy_terms).sum(dim=-1) + 0.5 * a * phi_med * rho  # (B, N_x, N_y, N_z)
         E_tot = E_loc.mean(dim=(1, 2, 3))  # (B,) total physical energy per batch element
 
         E_tot_norm = (E_tot - self.E_mean) / self.E_std
