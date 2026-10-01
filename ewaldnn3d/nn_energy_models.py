@@ -363,7 +363,7 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
             N_energy_terms=N_energy_terms + 1 + M,
             raw_output=True,
         )
-        
+
         with torch.no_grad():
             out_layer = self.local_nn.loc_network[-1]
             out_layer.weight[N_energy_terms].zero_()
