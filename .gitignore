@@ -29,13 +29,11 @@ LearningWC2d_checkpoints/
 .claude/
 Claude outputs/
 *.log
-checkerboard/*
-Ry_checkerboard/*
+checkerboard/data/
+checkerboard/results/
+checkerboard/__pycache__/
 # Agentic discovery of equations of motion (hidden mediator field in dynamics):
 agentic_EOM/*
-
-
-
 # 3D checks:
 QM7_Iman/*
 
