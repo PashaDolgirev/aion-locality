@@ -4,10 +4,10 @@
 #     E_b = sum_s X_{b,s} lam_s + c,     X_{b,s} = (1 / 2 N_s^2) sum_{k in orbit s} |rho_hat_{k,b}|^2,
 # where orbit s = {(±k_x, ±k_y), (±k_y, ±k_x)} is the set of momenta related by the square-lattice symmetries
 # (the kernel of a square torus has lam_k constant on each orbit).  With fixed N, sum_k |rho_hat_k|^2 = N N_s for
-# every sample, so lam is determined up to an additive constant (a shift of the on-site K_0), and |rho_hat_0|^2 = N^2 is
-# constant too, so lam_0 is unobservable (a uniform shift of K_r).  The gauge is lam_0 = 0 and sum_k lam_k = 0,
-# i.e. zero on-site interaction K_0 = 0 -- the convention of the true kernel; the regression drops the k = 0
-# column and the last orbit (an internal gauge) and align() restores the convention.
+# every sample, so lam is determined up to an additive constant (the K_0 convention), and |rho_hat_0|^2 = N^2 is
+# constant too, so lam_0 is unobservable (a uniform shift of K_r).  Gauge: lam_0 = 0 and sum_{k != 0} lam_k = 0,
+# i.e. K_0 = 0 -- the convention of the energy formula itself (psi(0) := 0); the regression drops the k = 0 column and
+# one further column (the last orbit) to remove the null direction, and align() then moves the result to the gauge.
 
 import math
 import torch
@@ -25,7 +25,7 @@ class OrbitBasis:
         self.n_par = len(uniq)
         self.k_rep = torch.stack([uniq // (L // 2 + 1), uniq % (L // 2 + 1)], 1)   # representative (a, b) per orbit
         self.mult = torch.bincount(inv, minlength=self.n_par).double()
-        # reorder: k = 0 first (constant column, dropped from the regression), (pi, 0) last (gauge)
+        # reorder: k = 0 first (constant column, dropped from the regression), (pi, 0) last (column dropped to remove the null direction)
         i0 = int(((self.k_rep[:, 0] == 0) & (self.k_rep[:, 1] == 0)).nonzero()); iX = int(((self.k_rep[:, 0] == L // 2) & (self.k_rep[:, 1] == 0)).nonzero())
         order = [i0] + [i for i in range(self.n_par) if i not in (i0, iX)] + [iX]
         perm = torch.empty(self.n_par, dtype=torch.long); perm[torch.tensor(order)] = torch.arange(self.n_par)
@@ -50,12 +50,10 @@ class OrbitBasis:
         return theta[self.orbit]
 
     def kernel(self, theta):
-        """Real-space K_r (L, L) from orbit values, in the gauge K_0 = 0 and sum_r K_r = 0 (the real-space mirror of
-        align): with fixed N the energies are invariant under lam_k -> lam_k + c (K_0) and lam_0 -> lam_0 + c'
-        (a uniform shift of K_r), so K_r is determined up to a constant plus a delta at r = 0."""
-        K = torch.fft.ifft2(self.lam_full(theta).to(torch.complex128)).real
-        K = K - (K.sum() - K[0, 0]) / (self.N_s - 1); K[0, 0] = 0.0
-        return K
+        """Real-space K_r (L, L) from orbit values in the gauge of align(): lam_0 = 0 gives sum_r K_r = 0 and
+        sum_k lam_k = 0 gives K_0 = 0 (with fixed N the energies are invariant under lam_k -> lam_k + c and
+        lam_0 -> lam_0 + c', i.e. K_r is determined up to a constant plus a delta at r = 0)."""
+        return torch.fft.ifft2(self.lam_full(theta).to(torch.complex128)).real
 
     def mean_structure_factor(self, pos, sim, batch=64):
         acc = torch.zeros(self.L, self.L)
@@ -75,9 +73,9 @@ def fit_kernel(X, E):
 
 
 def align(lam, mult):
-    """Project onto the gauge lam_0 = 0 and sum_k lam_k = 0 (zero on-site interaction, K_0 = 0): subtract the
-    multiplicity-weighted mean of lam over k != 0, then zero the unobservable lam_0.  mult: orbit multiplicities."""
-    out = lam - (mult[1:] @ lam[1:]) / mult[1:].sum(); out[0] = 0.0
+    """Gauge: lam_0 = 0 (unobservable) and sum_{k != 0} lam_k = 0 over the full grid (orbit multiplicities mult),
+    i.e. K_0 = 0.  Applied to learned and true kernels alike before they are compared."""
+    out = lam - float((lam[1:] * mult[1:]).sum() / mult[1:].sum()); out[0] = 0.0
     return out
 
 
@@ -101,3 +99,12 @@ def jackknife(values):
     """Leave-one-out jackknife: values (K,) of a statistic computed on the K leave-one-group-out subsets -> (mean, std)."""
     v = torch.as_tensor(values, dtype=torch.float64); K = len(v)
     return float(v.mean()), float(((K - 1) / K * ((v - v.mean()) ** 2).sum()).sqrt())
+
+
+def sensitivity(X, theta, E_std, n_noise=256, seed=0):
+    """Relative error of each orbit value per unit relative label noise (data property, no noise added)."""
+    Xc = X[:, 1:-1] - X[:, 1:-1].mean(0); sc = Xc.norm(dim=0).clamp(min=1e-300)
+    eps = torch.randn(len(X), n_noise, generator=torch.Generator().manual_seed(seed))
+    dth = torch.linalg.lstsq(Xc / sc, eps, driver="gelsd").solution / sc.unsqueeze(1)
+    out = E_std * dth.std(1) / theta[1:-1].abs().clamp(min=1e-300)
+    return torch.cat([out.new_zeros(1), out, out.new_zeros(1)])
