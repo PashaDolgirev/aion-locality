@@ -369,6 +369,27 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
             out_layer.weight[N_energy_terms].zero_()
             out_layer.bias[N_energy_terms] = 0.1
 
+    def _phi_stack_and_z(self, features_orig: torch.Tensor, rho: torch.Tensor):
+        """Screened fields phi_{q_m} = K_{q_m} * rho (B, N_x, N_y, N_z, M) and
+        the raw network outputs z (B, N_x, N_y, N_z, N_energy_terms + 1 + M)."""
+        phi_stack = torch.stack(
+            [conv_fft(rho, self.lam_K[m].to(dtype=rho.dtype)) for m in range(self.M)],
+            dim=-1)  # (B, N_x, N_y, N_z, M)
+        phi_feat = (phi_stack / self.lam_norm) / self.std_feat[..., 0]  # per-channel, fixed normalizers
+        features_ext = torch.cat([features_orig, phi_feat], dim=-1)
+        z = self.local_nn(features_ext)
+        return phi_stack, z
+
+    def qs_avg(self, features: torch.Tensor) -> torch.Tensor:
+        """Local average screening momentum <qs>(r) = sum_m s_m(x_r) q_m
+        from the softmax selection; shape (B, N_x, N_y, N_z)."""
+        features_orig = features[..., :self.N_feat]
+        rho = self._rho_from_features(features_orig)
+        _, z = self._phi_stack_and_z(features_orig, rho)
+        s = torch.softmax(z[..., self.N_energy_terms + 1:], dim=-1)
+        qs = torch.tensor(self.qs_list, device=s.device, dtype=s.dtype)
+        return (s * qs).sum(dim=-1)
+
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         features_orig = features[..., :self.N_feat] # (B, N_x, N_y, N_z, N_feat), normalized features
         energy_terms = features[..., self.N_feat:] # (B, N_x, N_y, N_z, N_energy_terms), physical (unnormalized) energy terms
@@ -377,19 +398,13 @@ class EwaldNNExtended3d(_NormalizedEnergyModel):
 
         # screened phi_{q_m} = K_{q_m} * rho (features) and, if subtracting,
         # delta dphi_{q_m} = (K_{q_m} - K_Coulomb) * rho (energy)
-        phi_stack = torch.stack(
-            [conv_fft(rho, self.lam_K[m].to(dtype=rho.dtype)) for m in range(self.M)],
-            dim=-1)  # (B, N_x, N_y, N_z, M)
+        phi_stack, z = self._phi_stack_and_z(features_orig, rho)
         if self.flag_subtract_H:
             med_stack = torch.stack(
                 [conv_fft(rho, self.lam_dK[m].to(dtype=rho.dtype)) for m in range(self.M)],
                 dim=-1)  # (B, N_x, N_y, N_z, M)
         else:
             med_stack = phi_stack  # unsubtracted screened fields in the energy term
-
-        phi_feat = (phi_stack / self.lam_norm) / self.std_feat[..., 0]  # per-channel, fixed normalizers
-        features_ext = torch.cat([features_orig, phi_feat], dim=-1)
-        z = self.local_nn(features_ext)  # (B, N_x, N_y, N_z, N_energy_terms + 1 + M), raw
 
         factors = 1.0 + torch.tanh(z[..., :self.N_energy_terms])   # reweighting f_a in [0, 2]
         a = z[..., self.N_energy_terms]                            # mediator reweighting a(x_r), either sign
