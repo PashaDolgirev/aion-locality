@@ -24,7 +24,9 @@ run_exp2*
 exp2*
 LearningEngFunc2d_checkpoints/*
 # Wigner-crystal examples:
-wc/*
+wc/data/
+wc/results/
+wc/__pycache__/
 LearningWC2d_checkpoints/
 .claude/
 Claude outputs/
